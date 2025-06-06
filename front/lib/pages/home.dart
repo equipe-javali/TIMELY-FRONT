@@ -172,7 +172,7 @@ class _HomeState extends State<Home> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Meus apontamentos', 
+                  'Controle de acesso', 
                   style: TextStyle(
                     fontWeight: FontWeight.bold, 
                     fontSize: 18,
@@ -211,11 +211,11 @@ class _HomeState extends State<Home> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {},
-        backgroundColor: Colors.green,
-        child: const Icon(Icons.add),
-      ),
+      // floatingActionButton: FloatingActionButton(
+      //   onPressed: () {},
+      //   backgroundColor: Colors.green,
+      //   child: const Icon(Icons.add),
+      // ),
     );
   }
 

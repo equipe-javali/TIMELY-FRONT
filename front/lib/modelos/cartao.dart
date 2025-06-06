@@ -5,16 +5,16 @@ class CartaoModel {
   final bool? autorizado;
 
   CartaoModel({
-    required this.codigo, 
-    required this.timestamp, 
-    this.nome, 
-    this.autorizado
+    required this.codigo,
+    required this.timestamp,
+    this.nome,
+    this.autorizado,
   });
 
   factory CartaoModel.fromJson(Map<String, dynamic> json) {
     return CartaoModel(
-      codigo: json['cartao']['codigo'] ?? '',
-      timestamp: json['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+      codigo: json['codigo'],
+      timestamp: json['timestamp'],
       nome: json['nome'],
       autorizado: json['autorizado'],
     );
@@ -22,10 +22,10 @@ class CartaoModel {
 
   Map<String, dynamic> toJson() {
     return {
-      'cartao': {'codigo': codigo},
-      'nome': nome,
+      'codigo': codigo,
       'timestamp': timestamp,
-      'autorizado': autorizado,
+      if (nome != null) 'nome': nome,
+      if (autorizado != null) 'autorizado': autorizado,
     };
   }
 }
