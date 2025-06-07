@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../utils/date_format.dart';
 import '../config/app_config.dart';
 import '../modelos/cartao.dart';
@@ -8,13 +10,7 @@ import '../services/data_service_provider.dart';
 import '../components/drawer.dart';
 
 // Enum para os tipos de filtro de tempo
-enum FiltroTempo {
-  hoje,
-  seteDias,
-  quinzeDias,
-  trintaDias,
-  todos
-}
+enum FiltroTempo { hoje, seteDias, quinzeDias, trintaDias, todos }
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -30,28 +26,24 @@ class _HomeState extends State<Home> {
   bool _hasError = false;
   String _errorMessage = '';
   Timer? _timer;
-  
+
   // Filtro de tempo selecionado (padrão: todos)
   FiltroTempo _filtroSelecionado = FiltroTempo.todos;
-  
+
   final Color _primaryBlue = const Color(0xFF006699);
   final Color _lightBlue = const Color(0xFFE6F2F8);
 
   @override
   void initState() {
     super.initState();
-    
-    _dataService = DataServiceProvider.getService(
-      useMockData: AppConfig.useMockData,
-      apiBaseUrl: AppConfig.apiBaseUrl
-    );
-    
+
+    _dataService =
+        DataServiceProvider.getService(apiBaseUrl: AppConfig.apiBaseUrl);
+
     _carregarDados();
-    
-    _timer = Timer.periodic(
-      Duration(seconds: AppConfig.dataRefreshInterval), 
-      (timer) => _carregarDados()
-    );
+
+    _timer = Timer.periodic(Duration(seconds: AppConfig.dataRefreshInterval),
+        (timer) => _carregarDados());
   }
 
   @override
@@ -62,11 +54,11 @@ class _HomeState extends State<Home> {
 
   Future<void> _carregarDados() async {
     if (_isLoading) return;
-    
+
     if (AppConfig.enableLogging) {
       print('Carregando dados...');
     }
-    
+
     setState(() {
       _isLoading = true;
       _hasError = false;
@@ -74,14 +66,14 @@ class _HomeState extends State<Home> {
 
     try {
       final registros = await _dataService.getUltimosRegistros();
-      
+
       if (mounted) {
         setState(() {
           _registros = registros;
           _isLoading = false;
         });
       }
-      
+
       if (AppConfig.enableLogging) {
         print('Dados carregados: ${registros.length} registros');
       }
@@ -89,7 +81,7 @@ class _HomeState extends State<Home> {
       if (AppConfig.enableLogging) {
         print('Erro ao carregar dados: $e');
       }
-      
+
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -114,7 +106,7 @@ class _HomeState extends State<Home> {
   List<CartaoModel> _getRegistrosFiltrados() {
     final agora = DateTime.now();
     late final DateTime dataLimite;
-    
+
     switch (_filtroSelecionado) {
       case FiltroTempo.hoje:
         dataLimite = DateTime(agora.year, agora.month, agora.day);
@@ -131,12 +123,12 @@ class _HomeState extends State<Home> {
       case FiltroTempo.todos:
         return _registros; // Retorna todos os registros
     }
-    
+
     final timestampLimite = dataLimite.millisecondsSinceEpoch;
-    
-    return _registros.where((registro) => 
-      registro.timestamp >= timestampLimite
-    ).toList();
+
+    return _registros
+        .where((registro) => registro.timestamp >= timestampLimite)
+        .toList();
   }
 
   // String do título do filtro
@@ -159,7 +151,7 @@ class _HomeState extends State<Home> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Apontamentos'),
+        title: const Text('Controle de Ponto'),
         backgroundColor: _primaryBlue,
       ),
       drawer: MeuDrawer(),
@@ -171,14 +163,11 @@ class _HomeState extends State<Home> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Controle de acesso', 
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold, 
-                    fontSize: 18,
-                    color: _primaryBlue
-                  )
-                ),
+                Text('Registro de Ponto',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: _primaryBlue)),
                 const SizedBox(height: 12),
                 _buildFiltroSelect(),
               ],
@@ -205,17 +194,17 @@ class _HomeState extends State<Home> {
             padding: EdgeInsets.symmetric(vertical: 10),
             alignment: Alignment.center,
             child: Text(
-              'Copyright © 2025',
+              'Copyright © ${DateTime.now().year}',
               style: TextStyle(color: Colors.white, fontSize: 14),
             ),
           ),
         ],
       ),
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: () {},
-      //   backgroundColor: Colors.green,
-      //   child: const Icon(Icons.add),
-      // ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddCardDialog(),
+        backgroundColor: Colors.green,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
@@ -308,15 +297,84 @@ class _HomeState extends State<Home> {
       );
     }
 
+    // Agrupar os registros por código de cartão e por data (YYYY-MM-DD)
+    final Map<String, Map<String, Map<String, String>>> registrosAgrupados = {};
+
+    for (final registro in registros) {
+      final data = _formatarData(registro.timestamp);
+      final codigo = registro.codigo;
+      final hora = _formatarTimestamp(registro.timestamp);
+
+      // Normalizar o tipo para corresponder às chaves do mapa
+      String tipoNormalizado;
+      if (registro.tipo.toLowerCase() == 'saida' ||
+          registro.tipo.toLowerCase() == 'saída') {
+        tipoNormalizado = 'saida';
+      } else {
+        tipoNormalizado = 'entrada';
+      }
+
+      if (AppConfig.enableLogging) {
+        print(
+            'Registro: codigo=$codigo, data=$data, hora=$hora, tipo original=${registro.tipo}, normalizado=$tipoNormalizado');
+      }
+
+      // Criar chave para cartão se não existir
+      if (!registrosAgrupados.containsKey(codigo)) {
+        registrosAgrupados[codigo] = {};
+      }
+
+      // Criar chave para data se não existir
+      if (!registrosAgrupados[codigo]!.containsKey(data)) {
+        registrosAgrupados[codigo]![data] = {'entrada': '', 'saida': ''};
+      }
+
+      // Armazenar a hora na entrada ou saída conforme o tipo normalizado
+      registrosAgrupados[codigo]![data]![tipoNormalizado] = hora;
+    }
+
+    // Converter mapa para lista de registros consolidados para exibir
+    List<Map<String, dynamic>> registrosConsolidados = [];
+
+    registrosAgrupados.forEach((codigo, dataMap) {
+      dataMap.forEach((data, horarios) {
+        registrosConsolidados.add({
+          'codigo': codigo,
+          'data': data,
+          'entrada': horarios['entrada'] ?? '-',
+          'saida': horarios['saida'] ?? '-',
+        });
+      });
+    });
+
+    // Ordenar por data (mais recente primeiro) e código
+    registros.sort((a, b) {
+      // Extrair apenas a data para comparação inicial
+      final dataA = _formatarData(a.timestamp);
+      final dataB = _formatarData(b.timestamp);
+
+      // Comparar por data (decrescente)
+      final dataComp = dataB.compareTo(dataA);
+      if (dataComp != 0) return dataComp;
+
+      // Se mesma data, comparar por código (crescente)
+      final codigoComp = a.codigo.compareTo(b.codigo);
+      if (codigoComp != 0) return codigoComp;
+
+      // Se mesmo código, ordenar por timestamp (crescente = cronológica)
+      return a.timestamp.compareTo(b.timestamp);
+    });
+
     return Column(
       children: [
         Container(
           color: _primaryBlue,
           child: Row(
             children: [
-              _buildHeaderCell('Nome', flex: 1),
-              _buildHeaderCell('Início', flex: 1),
-              _buildHeaderCell('Fim', flex: 1),
+              _buildHeaderCell('Código', flex: 2),
+              _buildHeaderCell('Data', flex: 2),
+              _buildHeaderCell('Hora', flex: 1),
+              _buildHeaderCell('Tipo', flex: 1),
             ],
           ),
         ),
@@ -328,14 +386,18 @@ class _HomeState extends State<Home> {
               itemBuilder: (context, index) {
                 final registro = registros[index];
                 final bool isEven = index.isEven;
-                
+
+                final data = _formatarData(registro.timestamp);
+                final hora = _formatarTimestamp(registro.timestamp);
+
                 return Container(
                   color: isEven ? Colors.white : _lightBlue,
                   child: Row(
                     children: [
-                      _buildDataCell(registro.nome ?? 'Nome', flex: 1),
-                      _buildDataCell(_formatarTimestamp(registro.timestamp), flex: 1),
-                      _buildDataCell('Fim', flex: 1),
+                      _buildDataCell(registro.codigo, flex: 2),
+                      _buildDataCell(data, flex: 2),
+                      _buildDataCell(hora, flex: 1),
+                      _buildTypeCell(registro.tipo),
                     ],
                   ),
                 );
@@ -346,7 +408,117 @@ class _HomeState extends State<Home> {
       ],
     );
   }
+
+  // Novo método para construir células de horário com ícones
+  Widget _buildTypeCell(String tipo) {
+  // Normalizar tipo
+  final tipoNormalizado = tipo.toLowerCase();
+  final bool isEntrada = 
+      tipoNormalizado == 'entrada';
   
+  final Color color = isEntrada ? Colors.green : Colors.red;
+  final IconData icon = isEntrada ? Icons.login : Icons.logout;
+  
+  return Expanded(
+    flex: 1,
+    child: Container(
+      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      alignment: Alignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 16),
+          SizedBox(width: 4),
+          Text(
+            isEntrada ? 'ENTRADA' : 'SAÍDA',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+  // Método para mostrar diálogo para adicionar cartão manualmente
+  void _showAddCardDialog() {
+    final codigoController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Registrar Cartão'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Informe o código do cartão para registrar um ponto'),
+            SizedBox(height: 15),
+            TextField(
+              controller: codigoController,
+              decoration: InputDecoration(
+                labelText: 'Código do cartão',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (codigoController.text.isNotEmpty) {
+                try {
+                  await _enviarRegistroPonto(codigoController.text);
+                  Navigator.of(context).pop();
+                  _carregarDados();
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Ponto registrado com sucesso!')));
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Erro ao registrar ponto: $e'),
+                    backgroundColor: Colors.red,
+                  ));
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryBlue,
+            ),
+            child: Text('Registrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Método para enviar um registro de ponto manualmente
+  Future<void> _enviarRegistroPonto(String codigo) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/dados'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'cartao': {'codigo': codigo}
+        }),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return;
+      } else {
+        throw Exception(
+            'Erro ao registrar ponto. Status: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Erro de conexão: $e');
+    }
+  }
+
   Widget _buildHeaderCell(String text, {int flex = 1}) {
     return Expanded(
       flex: flex,
