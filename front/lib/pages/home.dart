@@ -262,7 +262,7 @@ class _HomeState extends State<Home> {
         child: CircularProgressIndicator(),
       );
     }
-
+  
     if (_hasError && registros.isEmpty) {
       return Center(
         child: Column(
@@ -283,7 +283,7 @@ class _HomeState extends State<Home> {
         ),
       );
     }
-
+  
     if (registros.isEmpty) {
       return Center(
         child: Column(
@@ -296,75 +296,64 @@ class _HomeState extends State<Home> {
         ),
       );
     }
-
-    // Agrupar os registros por código de cartão e por data (YYYY-MM-DD)
-    final Map<String, Map<String, Map<String, String>>> registrosAgrupados = {};
-
-    for (final registro in registros) {
-      final data = _formatarData(registro.timestamp);
+  
+    // Organizar por cartão, data, e tipo
+    Map<String, Map<String, List<CartaoModel>>> registrosPorCartaoData = {};
+  
+    for (var registro in registros) {
       final codigo = registro.codigo;
-      final hora = _formatarTimestamp(registro.timestamp);
-
-      // Normalizar o tipo para corresponder às chaves do mapa
-      String tipoNormalizado;
-      if (registro.tipo.toLowerCase() == 'saida' ||
-          registro.tipo.toLowerCase() == 'saída') {
-        tipoNormalizado = 'saida';
-      } else {
-        tipoNormalizado = 'entrada';
+      final data = _formatarData(registro.timestamp);
+      
+      // Criar a estrutura de dados se não existir
+      if (!registrosPorCartaoData.containsKey(codigo)) {
+        registrosPorCartaoData[codigo] = {};
       }
-
-      if (AppConfig.enableLogging) {
-        print(
-            'Registro: codigo=$codigo, data=$data, hora=$hora, tipo original=${registro.tipo}, normalizado=$tipoNormalizado');
+      if (!registrosPorCartaoData[codigo]!.containsKey(data)) {
+        registrosPorCartaoData[codigo]![data] = [];
       }
-
-      // Criar chave para cartão se não existir
-      if (!registrosAgrupados.containsKey(codigo)) {
-        registrosAgrupados[codigo] = {};
-      }
-
-      // Criar chave para data se não existir
-      if (!registrosAgrupados[codigo]!.containsKey(data)) {
-        registrosAgrupados[codigo]![data] = {'entrada': '', 'saida': ''};
-      }
-
-      // Armazenar a hora na entrada ou saída conforme o tipo normalizado
-      registrosAgrupados[codigo]![data]![tipoNormalizado] = hora;
+      
+      // Adicionar o registro na lista
+      registrosPorCartaoData[codigo]![data]!.add(registro);
     }
-
-    // Converter mapa para lista de registros consolidados para exibir
-    List<Map<String, dynamic>> registrosConsolidados = [];
-
-    registrosAgrupados.forEach((codigo, dataMap) {
-      dataMap.forEach((data, horarios) {
-        registrosConsolidados.add({
-          'codigo': codigo,
-          'data': data,
-          'entrada': horarios['entrada'] ?? '-',
-          'saida': horarios['saida'] ?? '-',
-        });
+    
+    // Converter para lista para mostrar na tabela
+    List<Map<String, dynamic>> registrosParaExibir = [];
+    
+    registrosPorCartaoData.forEach((codigo, dataMap) {
+      dataMap.forEach((data, registrosDoDia) {
+        // Ordenar registros por timestamp
+        registrosDoDia.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        
+        // Separar registros por tipo
+        List<CartaoModel> entradas = registrosDoDia
+            .where((r) => r.tipo.toLowerCase() == 'entrada')
+            .toList();
+        List<CartaoModel> saidas = registrosDoDia
+            .where((r) => r.tipo.toLowerCase() == 'saida' || 
+                           r.tipo.toLowerCase() == 'saída')
+            .toList();
+        
+        // Criar pares de entrada/saída (1 para 1)
+        int maxPares = entradas.length > saidas.length ? entradas.length : saidas.length;
+        
+        for (int i = 0; i < maxPares; i++) {
+          registrosParaExibir.add({
+            'codigo': codigo,
+            'data': data,
+            'entrada': i < entradas.length ? _formatarTimestamp(entradas[i].timestamp) : '-',
+            'saida': i < saidas.length ? _formatarTimestamp(saidas[i].timestamp) : '-',
+          });
+        }
       });
     });
-
-    // Ordenar por data (mais recente primeiro) e código
-    registros.sort((a, b) {
-      // Extrair apenas a data para comparação inicial
-      final dataA = _formatarData(a.timestamp);
-      final dataB = _formatarData(b.timestamp);
-
-      // Comparar por data (decrescente)
-      final dataComp = dataB.compareTo(dataA);
+    
+    // Ordenar por data (mais recente primeiro) e depois por código
+    registrosParaExibir.sort((a, b) {
+      int dataComp = b['data'].compareTo(a['data']);
       if (dataComp != 0) return dataComp;
-
-      // Se mesma data, comparar por código (crescente)
-      final codigoComp = a.codigo.compareTo(b.codigo);
-      if (codigoComp != 0) return codigoComp;
-
-      // Se mesmo código, ordenar por timestamp (crescente = cronológica)
-      return a.timestamp.compareTo(b.timestamp);
+      return a['codigo'].compareTo(b['codigo']);
     });
-
+    
     return Column(
       children: [
         Container(
@@ -373,8 +362,8 @@ class _HomeState extends State<Home> {
             children: [
               _buildHeaderCell('Código', flex: 2),
               _buildHeaderCell('Data', flex: 2),
-              _buildHeaderCell('Hora', flex: 1),
-              _buildHeaderCell('Tipo', flex: 1),
+              _buildHeaderCell('Entrada', flex: 2),
+              _buildHeaderCell('Saída', flex: 2),
             ],
           ),
         ),
@@ -382,22 +371,19 @@ class _HomeState extends State<Home> {
           child: RefreshIndicator(
             onRefresh: _carregarDados,
             child: ListView.builder(
-              itemCount: registros.length,
+              itemCount: registrosParaExibir.length,
               itemBuilder: (context, index) {
-                final registro = registros[index];
+                final registro = registrosParaExibir[index];
                 final bool isEven = index.isEven;
-
-                final data = _formatarData(registro.timestamp);
-                final hora = _formatarTimestamp(registro.timestamp);
-
+  
                 return Container(
                   color: isEven ? Colors.white : _lightBlue,
                   child: Row(
                     children: [
-                      _buildDataCell(registro.codigo, flex: 2),
-                      _buildDataCell(data, flex: 2),
-                      _buildDataCell(hora, flex: 1),
-                      _buildTypeCell(registro.tipo),
+                      _buildDataCell(registro['codigo'], flex: 2),
+                      _buildDataCell(registro['data'], flex: 2),
+                      _buildTimeCell(registro['entrada'], isEntrada: true),
+                      _buildTimeCell(registro['saida'], isEntrada: false),
                     ],
                   ),
                 );
@@ -408,40 +394,48 @@ class _HomeState extends State<Home> {
       ],
     );
   }
-
-  // Novo método para construir células de horário com ícones
-  Widget _buildTypeCell(String tipo) {
-  // Normalizar tipo
-  final tipoNormalizado = tipo.toLowerCase();
-  final bool isEntrada = 
-      tipoNormalizado == 'entrada';
   
-  final Color color = isEntrada ? Colors.green : Colors.red;
-  final IconData icon = isEntrada ? Icons.login : Icons.logout;
-  
-  return Expanded(
-    flex: 1,
-    child: Container(
-      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      alignment: Alignment.center,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 16),
-          SizedBox(width: 4),
-          Text(
-            isEntrada ? 'ENTRADA' : 'SAÍDA',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+  // Novo método para mostrar células de hora com formatação adequada
+  Widget _buildTimeCell(String time, {required bool isEntrada}) {
+    if (time == '-') {
+      return Expanded(
+        flex: 2,
+        child: Container(
+          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          alignment: Alignment.center,
+          child: Text(
+            '-',
+            style: TextStyle(color: Colors.grey),
           ),
-        ],
+        ),
+      );
+    }
+    
+    Color color = isEntrada ? Colors.green : Colors.red;
+    IconData icon = isEntrada ? Icons.login : Icons.logout;
+    
+    return Expanded(
+      flex: 2,
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 16),
+            SizedBox(width: 4),
+            Text(
+              time,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
-
+    );
+  }
   // Método para mostrar diálogo para adicionar cartão manualmente
   void _showAddCardDialog() {
     final codigoController = TextEditingController();
